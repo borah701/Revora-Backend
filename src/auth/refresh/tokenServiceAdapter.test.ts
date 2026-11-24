@@ -18,7 +18,8 @@ describe('JwtTokenServiceAdapter', () => {
             sub: 'user-42',
             sid: 'session-99',
             role: 'investor',
-        } as any);
+            typ: 'refresh',
+        });
 
         const result = adapter.verifyRefreshToken('sample-jwt-token');
 
@@ -46,22 +47,37 @@ describe('JwtTokenServiceAdapter', () => {
             accessToken: 'mock-access-token',
             refreshToken: 'mock-refresh-token',
         });
-        expect(issueTokenSpy).toHaveBeenCalledWith({
+        expect(issueTokenSpy).toHaveBeenNthCalledWith(1, {
             subject: 'user-42',
             expiresIn: jwtLib.TOKEN_EXPIRY,
             additionalPayload: {
                 sid: 'session-99',
                 role: 'investor',
+                typ: 'access',
             },
         });
-        expect(issueTokenSpy).toHaveBeenCalledWith({
+        expect(issueTokenSpy).toHaveBeenNthCalledWith(2, {
             subject: 'user-42',
             expiresIn: jwtLib.REFRESH_TOKEN_EXPIRY,
             additionalPayload: {
                 sid: 'session-99',
                 role: 'investor',
+                typ: 'refresh',
             },
         });
+    });
+
+    it('rejects a token that is not explicitly typed as a refresh token', () => {
+        jest.spyOn(jwtLib, 'verifyToken').mockReturnValue({
+            sub: 'user-42',
+            sid: 'session-99',
+            role: 'investor',
+            typ: 'access',
+        });
+
+        expect(() => adapter.verifyRefreshToken('access-token')).toThrow(
+            'Token is not a refresh token',
+        );
     });
 
     it('hashes token with sha256', () => {

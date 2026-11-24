@@ -1,4 +1,4 @@
-import { Pool, PoolClient } from 'pg';
+import { Pool } from 'pg';
 
 /**
  * Vesting schedule entity from database
@@ -136,7 +136,7 @@ export class VestingScheduleRepository {
       input.userId
     ]);
 
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**

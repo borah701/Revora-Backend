@@ -28,7 +28,7 @@ export class NotificationRepository {
     `;
 
     const values = [input.user_id, input.type, input.title, input.body];
-    const result: QueryResult = await this.db.query(query, values);
+    const result: QueryResult<Notification> = await this.db.query(query, values);
     if (result.rows.length === 0) throw new Error('Failed to create notification');
     return this.mapNotification(result.rows[0]);
   }
@@ -39,7 +39,7 @@ export class NotificationRepository {
       WHERE user_id = $1 
       ORDER BY created_at DESC
     `;
-    const result: QueryResult = await this.db.query(query, [userId]);
+    const result: QueryResult<Notification> = await this.db.query(query, [userId]);
     return result.rows.map((row) => this.mapNotification(row));
   }
 
@@ -50,7 +50,7 @@ export class NotificationRepository {
       WHERE id = $1 AND user_id = $2 AND read_at IS NULL
     `;
     const result: QueryResult = await this.db.query(query, [notificationId, userId]);
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async markReadBulk(notificationIds: string[], userId: string): Promise<number> {
@@ -65,10 +65,10 @@ export class NotificationRepository {
       WHERE id = ANY($1) AND user_id = $2 AND read_at IS NULL
     `;
     const result: QueryResult = await this.db.query(query, [uniqueIds, userId]);
-    return result.rowCount;
+    return result.rowCount ?? 0;
   }
 
-  private mapNotification(row: any): Notification {
+  private mapNotification(row: Notification): Notification {
     return {
       id: row.id,
       user_id: row.user_id,

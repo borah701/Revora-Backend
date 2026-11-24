@@ -11,6 +11,8 @@ import {
   AdminSignatureContext,
 } from './auth';
 import { signJwt } from '../utils/jwt';
+import { hashSessionToken } from '../auth/session';
+import { JwtIssuerAdapter } from '../auth/login/jwtIssuerAdapter';
 import {
   issueToken,
   signAdminStatusTransition,
@@ -83,7 +85,7 @@ describe('requireAuth middleware', () => {
     sessionRepo.findById.mockResolvedValueOnce({
       id: 'session-abc',
       user_id: 'user-123',
-      token_hash: 'arbitrary-hash',
+      token_hash: hashSessionToken(token),
       expires_at: new Date(Date.now() + 10 * 60 * 1000),
       created_at: new Date(),
     });
@@ -136,7 +138,7 @@ describe('requireAuth middleware', () => {
     expect(mockNext).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
   });
 
-  it('accepts valid access token without token hash check', async () => {
+  it('accepts a valid access token without comparing the refresh token hash', async () => {
     const token = signJwt({ sub: 'user-123', sid: 'session-abc', role: 'investor' });
     sessionRepo.findById.mockResolvedValueOnce({
       id: 'session-abc',
@@ -161,7 +163,7 @@ describe('requireAuth middleware', () => {
     sessionRepo.findById.mockResolvedValueOnce({
       id: 'session-abc',
       user_id: 'user-123',
-      token_hash: 'some-hash',
+      token_hash: hashSessionToken(token),
       expires_at: new Date(Date.now() + 10 * 60 * 1000),
       created_at: new Date(),
       revoked_at: new Date(),
@@ -181,7 +183,7 @@ describe('requireAuth middleware', () => {
     sessionRepo.findById.mockResolvedValueOnce({
       id: 'session-abc',
       user_id: 'user-123',
-      token_hash: 'some-hash',
+      token_hash: hashSessionToken(token),
       expires_at: new Date(Date.now() + 10 * 60 * 1000),
       created_at: new Date(),
       token_consumed_at: new Date(),
@@ -1162,37 +1164,6 @@ describe('regression: LoginService with createRequireAuth middleware', () => {
     }
   }
 
-  class RealJwtIssuer implements JwtIssuer {
-    sign(payload: { userId: string; sessionId: string; role: string }): {
-      accessToken: string;
-      refreshToken: string;
-    } {
-      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-      const accessPayload = Buffer.from(JSON.stringify({
-        sub: payload.userId,
-        sid: payload.sessionId,
-        role: payload.role,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + 900,
-      })).toString('base64url');
-      const refreshPayload = Buffer.from(JSON.stringify({
-        sub: payload.userId,
-        sid: payload.sessionId,
-        role: payload.role,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + 604800,
-      })).toString('base64url');
-
-      const accessSig = crypto.createHmac('sha256', SECRET).update(`${header}.${accessPayload}`).digest('base64url');
-      const refreshSig = crypto.createHmac('sha256', SECRET).update(`${header}.${refreshPayload}`).digest('base64url');
-
-      return {
-        accessToken: `${header}.${accessPayload}.${accessSig}`,
-        refreshToken: `${header}.${refreshPayload}.${refreshSig}`,
-      };
-    }
-  }
-
   const VALID_PASSWORD = 'correct-password';
   const validUser: UserRecord = {
     id: 'user-1',
@@ -1209,7 +1180,7 @@ describe('regression: LoginService with createRequireAuth middleware', () => {
   it('accepts a fresh access token from login', async () => {
     const userRepo = new InMemoryUserRepository([validUser]);
     const sessionRepo = new InMemorySessionRepository();
-    const jwtIssuer = new RealJwtIssuer();
+    const jwtIssuer = new JwtIssuerAdapter();
     const loginService = new LoginService(userRepo, sessionRepo as any, jwtIssuer);
     const requireAuth = createRequireAuth(sessionRepo as any);
 
@@ -1232,7 +1203,7 @@ describe('regression: LoginService with createRequireAuth middleware', () => {
   it('rejects request after session is revoked', async () => {
     const userRepo = new InMemoryUserRepository([validUser]);
     const sessionRepo = new InMemorySessionRepository();
-    const jwtIssuer = new RealJwtIssuer();
+    const jwtIssuer = new JwtIssuerAdapter();
     const loginService = new LoginService(userRepo, sessionRepo as any, jwtIssuer);
     const requireAuth = createRequireAuth(sessionRepo as any);
 
@@ -1259,7 +1230,7 @@ describe('regression: LoginService with createRequireAuth middleware', () => {
   it('rejects request after refresh token is consumed', async () => {
     const userRepo = new InMemoryUserRepository([validUser]);
     const sessionRepo = new InMemorySessionRepository();
-    const jwtIssuer = new RealJwtIssuer();
+    const jwtIssuer = new JwtIssuerAdapter();
     const loginService = new LoginService(userRepo, sessionRepo as any, jwtIssuer);
     const requireAuth = createRequireAuth(sessionRepo as any);
 

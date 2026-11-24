@@ -9,7 +9,6 @@ import crypto from 'crypto';
 import { requireCompliance } from '../middleware/auth';
 import { AMLService } from '../aml/amlService';
 import { CaseAssignmentService } from '../aml/caseAssignmentService';
-import { requireCompliance } from '../middleware/auth';
 import { z } from 'zod';
 
 /**

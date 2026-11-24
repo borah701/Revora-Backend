@@ -59,7 +59,7 @@ export class ChangePasswordService {
     }
 
     // Execute password change and session invalidation in a transaction
-    return withTransaction(this.db, async (client) => {
+    return withTransaction<ChangePasswordResult>(this.db, async (client) => {
       // Load user
       const user = await this.userRepo.findUserById(userId);
       if (!user) {

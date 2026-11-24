@@ -3,7 +3,7 @@
  * This file demonstrates how to use withTransaction in your repositories and services
  */
 
-import { Pool, PoolClient } from 'pg';
+import { Pool, PoolClient, QueryResult } from 'pg';
 import { withTransaction, transactional } from './transaction';
 
 // Example 1: Simple transaction with user creation
@@ -70,7 +70,7 @@ export async function createMultipleUsersExample(pool: Pool, users: Array<{ emai
     )
   );
   
-  const results = await transactional(pool, operations);
+  const results = await transactional<QueryResult[]>(pool, operations);
   return results.map(r => r.rows[0]);
 }
 

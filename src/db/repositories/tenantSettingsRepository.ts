@@ -75,12 +75,44 @@ export class TenantSettingsRepository {
   }
 
   private mapRow(row: Record<string, unknown>): TenantSettingsRow {
+    if (typeof row.tenant_id !== 'string') {
+      throw new Error('Invalid tenant_settings row: tenant_id is missing');
+    }
+
+    const rawSettings = row.settings;
+    if (
+      rawSettings !== null &&
+      rawSettings !== undefined &&
+      (typeof rawSettings !== 'object' || Array.isArray(rawSettings))
+    ) {
+      throw new Error('Invalid tenant_settings row: settings must be an object');
+    }
+
+    if (row.session_policy !== 'lax' && row.session_policy !== 'strict') {
+      throw new Error('Invalid tenant_settings row: session_policy is invalid');
+    }
+
+    const createdAt = this.parseDate(row.created_at, 'created_at');
+    const updatedAt = this.parseDate(row.updated_at, 'updated_at');
     return {
       tenant_id: row.tenant_id,
-      settings: row.settings ?? {},
-      session_policy: row.session_policy as 'lax' | 'strict',
-      created_at: row.created_at,
-      updated_at: row.updated_at,
+      settings: (rawSettings ?? {}) as Record<string, unknown>,
+      session_policy: row.session_policy,
+      created_at: createdAt,
+      updated_at: updatedAt,
     };
+  }
+
+  private parseDate(value: unknown, column: string): Date {
+    const parsed =
+      value instanceof Date
+        ? value
+        : typeof value === 'string' || typeof value === 'number'
+          ? new Date(value)
+          : null;
+    if (!parsed || !Number.isFinite(parsed.getTime())) {
+      throw new Error(`Invalid tenant_settings row: ${column} is not a valid date`);
+    }
+    return parsed;
   }
 }

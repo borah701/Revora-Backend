@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { Errors } from '../lib/errors';
-import { z, AnyZodObject, ZodEffects } from 'zod';
+import { z } from 'zod';
 type PrimitiveType = 'string' | 'number' | 'boolean';
 export type FieldSchema = {
   type: PrimitiveType;
@@ -45,12 +45,15 @@ function coerce(value: unknown, type: PrimitiveType): unknown {
   return String(value);
 }
 
-function validateObject(input: any, schema: ObjectSchema, pathPrefix: string): ValidationResult {
+function validateObject(input: unknown, schema: ObjectSchema, pathPrefix: string): ValidationResult {
   const errors: string[] = [];
 
   for (const key of Object.keys(schema)) {
     const rule = schema[key];
-    const value = input?.[key];
+    const value =
+      typeof input === 'object' && input !== null
+        ? (input as Record<string, unknown>)[key]
+        : undefined;
     const path = `${pathPrefix}.${key}`;
 
     if (value == null || value === '') {
@@ -116,7 +119,7 @@ function validateObject(input: any, schema: ObjectSchema, pathPrefix: string): V
 
 function makeMiddleware(
   schema: ObjectSchema | undefined,
-  pick: (req: Request) => any,
+  pick: (req: Request) => unknown,
   locationName: 'body' | 'query' | 'params'
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -146,7 +149,7 @@ export function validateParams(schema: ObjectSchema): RequestHandler {
 }
 
 export function validate(arg: ObjectSchema | ValidateOptions): RequestHandler[] | RequestHandler {
-  if ('body' in (arg as any) || 'query' in (arg as any) || 'params' in (arg as any)) {
+  if ('body' in arg || 'query' in arg || 'params' in arg) {
     const opts = arg as ValidateOptions;
     const parts: RequestHandler[] = [];
     if (opts.params) parts.push(validateParams(opts.params));
@@ -164,22 +167,24 @@ export function validate(arg: ObjectSchema | ValidateOptions): RequestHandler[] 
  * @property
  */
 
-export function validateZodBody(schema: AnyZodObject | ZodEffects<any>): RequestHandler {
+export function validateZodBody(schema: z.ZodType): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      return next(Errors.validationError('Invalid request parameters', result.error.issues.map((e: any) => `${e.path.join('.')}: ${e.message}`)));
+      return next(Errors.validationError('Invalid request parameters', result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`)));
     }
     req.body = result.data;
     next();
   };
 }
 
-export function validateZodParams(schema: AnyZodObject | ZodEffects<any>): RequestHandler {
+export function validateZodParams<T extends Record<string, string>>(
+  schema: z.ZodType<T>,
+): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.params);
     if (!result.success) {
-      return next(Errors.validationError('Invalid request parameters', result.error.issues.map((e: any) => `${e.path.join('.')}: ${e.message}`)));
+      return next(Errors.validationError('Invalid request parameters', result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`)));
     }
     req.params = result.data;
     next();

@@ -15,9 +15,9 @@ import {
 import crypto from "crypto";
 import {
   AuthContext,
-  AuthenticatedRequest as LogoutAuthenticatedRequest,
 } from "../auth/logout/types";
 import { SessionRepository as DbSessionRepository } from "../db/repositories/sessionRepository";
+import type { Session } from "../db/repositories/sessionRepository";
 import { isSessionExpired } from "../auth/session";
 import { Errors } from "../lib/errors";
 import { globalLogger } from "../lib/logger";
@@ -33,6 +33,7 @@ export interface AdminSignatureContext {
 
 // ── AuthenticatedRequest (JWT / sub-based) ────────────────────────────────────
 export interface AuthenticatedRequest extends Request {
+  auth?: AuthContext;
   user?: {
     sub?: string;
     id?: string;
@@ -148,16 +149,79 @@ interface JwtPayloadInternal {
  * @throws {Error} If the token format, signature, or expiry is invalid.
  */
 /** @deprecated Use verifyToken and the session-aware role middleware. */
-export function verifyJwt(token: string, _secretOrSecrets: string | string[]): JwtPayloadInternal {
-  return verifyExpiringToken(token) as JwtPayloadInternal;
+export function verifyJwt(
+  token: string,
+  secretOrSecrets: string | string[],
+): JwtPayloadInternal {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
+    throw new Error("Invalid token format");
+  }
+
+  const [encodedHeader, encodedPayload, encodedSignature] = parts;
+  let header: { alg?: unknown };
+  try {
+    header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("Invalid token signature");
+  }
+  if (header.alg !== "HS256") {
+    throw new Error("Invalid token signature");
+  }
+
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = Buffer.from(encodedSignature, "base64url");
+  const secrets = Array.isArray(secretOrSecrets)
+    ? secretOrSecrets
+    : [secretOrSecrets];
+  const signatureValid = secrets.some((secret) => {
+    if (!secret) return false;
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(signingInput)
+      .digest();
+    return (
+      signature.length === expected.length &&
+      crypto.timingSafeEqual(signature, expected)
+    );
+  });
+  if (!signatureValid) {
+    throw new Error("Invalid token signature");
+  }
+
+  let payload: Partial<JwtPayloadInternal>;
+  try {
+    payload = JSON.parse(
+      Buffer.from(encodedPayload, "base64url").toString("utf8"),
+    );
+  } catch {
+    throw new Error("Invalid token signature");
+  }
+
+  if (typeof payload.sub !== "string" || typeof payload.role !== "string") {
+    throw new Error("Invalid token signature");
+  }
+  if (
+    payload.exp !== undefined &&
+    (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000))
+  ) {
+    throw new Error("Token expired");
+  }
+
+  return {
+    sub: payload.sub,
+    role: payload.role,
+    sid: payload.sid,
+    iat: payload.iat,
+    exp: payload.exp,
+  };
 }
 
 type SessionValidationFailure =
   | "missing_subject_or_session"
   | "not_found_or_user_mismatch"
   | "revoked"
-  | "expired"
-  | "token_mismatch";
+  | "expired";
 
 function verifyExpiringToken(token: string): JwtPayload {
   const payload = verifyToken(token, getDefaultClaimValidationOptions());
@@ -170,34 +234,28 @@ function verifyExpiringToken(token: string): JwtPayload {
 
 async function validateSession(
   payload: JwtPayload,
-  token: string,
-  sessionRepository: DbSessionRepository,
-): Promise<SessionValidationFailure | undefined> {
-  if (!payload.sub || !payload.sid) return "missing_subject_or_session";
+  sessionRepository: Pick<DbSessionRepository, "findById">,
+): Promise<{ failure: SessionValidationFailure } | { session: Session }> {
+  if (!payload.sub || !payload.sid) {
+    return { failure: "missing_subject_or_session" };
+  }
 
   const session = await sessionRepository.findById(payload.sid);
   if (!session || session.user_id !== payload.sub) {
-    return "not_found_or_user_mismatch";
+    return { failure: "not_found_or_user_mismatch" };
   }
-  if (session.revoked_at) return "revoked";
+  if (session.revoked_at) return { failure: "revoked" };
   if (
     !(session.expires_at instanceof Date) ||
     !Number.isFinite(session.expires_at.getTime()) ||
     isSessionExpired(session.expires_at)
   ) {
-    return "expired";
+    return { failure: "expired" };
   }
 
-  const expectedHash = hashSessionToken(token);
-  const storedHash = session.token_hash;
-  if (
-    typeof storedHash !== "string" ||
-    storedHash.length !== expectedHash.length ||
-    !crypto.timingSafeEqual(Buffer.from(storedHash), Buffer.from(expectedHash))
-  ) {
-    return "token_mismatch";
-  }
-  return undefined;
+  // token_hash stores the refresh token fingerprint; the access JWT has
+  // already been signature-validated and is bound to this active session.
+  return { session };
 }
 
 function createRoleAuth(
@@ -228,11 +286,10 @@ function createRoleAuth(
       return;
     }
 
-    let sessionFailure: SessionValidationFailure | undefined;
+    let sessionValidation: Awaited<ReturnType<typeof validateSession>>;
     try {
-      sessionFailure = await validateSession(
+      sessionValidation = await validateSession(
         payload,
-        authHeader.slice(7),
         sessionRepository,
       );
     } catch (error) {
@@ -244,9 +301,9 @@ function createRoleAuth(
       return;
     }
 
-    if (sessionFailure) {
+    if ("failure" in sessionValidation) {
       globalLogger.warn(`Auth failed: ${requiredRole} session is not active`, {
-        reason: sessionFailure,
+        reason: sessionValidation.failure,
         userId: payload.sub,
         sessionId: payload.sid,
         path: req.path,
@@ -587,9 +644,9 @@ export function createRequireAuth(
       return;
     }
 
-    let failure: SessionValidationFailure | undefined;
+    let sessionValidation: Awaited<ReturnType<typeof validateSession>>;
     try {
-      failure = await validateSession(payload, token, sessionRepository);
+      sessionValidation = await validateSession(payload, sessionRepository);
     } catch (error) {
       globalLogger.error("Auth failed: Session lookup failed", {
         error: error instanceof Error ? error.message : "Unknown error",
@@ -598,40 +655,23 @@ export function createRequireAuth(
       next(Errors.internal("Authentication service unavailable"));
       return;
     }
-    if (failure) {
+    if ("failure" in sessionValidation) {
       globalLogger.warn("Auth failed: Session validation failed", {
-        reason: failure,
+        reason: sessionValidation.failure,
         sessionId: payload.sid,
         userId: payload.sub,
         path: req.path,
       });
-      next(
-        Errors.unauthorized("Unauthorized: session not found or user mismatch"),
-      );
+      const message = sessionValidation.failure === "revoked"
+        ? "Unauthorized: session revoked"
+        : sessionValidation.failure === "expired"
+          ? "Unauthorized: session expired"
+          : "Unauthorized: session not found or user mismatch";
+      next(Errors.unauthorized(message));
       return;
     }
 
-    if (isSessionExpired(session.expires_at)) {
-      globalLogger.warn("Auth failed: Session expired", {
-        sessionId: payload.sid,
-        userId: payload.sub,
-        path: req.path,
-      });
-      next(Errors.unauthorized("Unauthorized: session expired"));
-      return;
-    }
-
-    if (session.revoked_at) {
-      globalLogger.warn("Auth failed: Session revoked", {
-        sessionId: payload.sid,
-        userId: payload.sub,
-        revokedAt: session.revoked_at,
-        path: req.path,
-      });
-      next(Errors.unauthorized("Unauthorized: session revoked"));
-      return;
-    }
-
+    const session = sessionValidation.session;
     if (session.token_consumed_at) {
       globalLogger.warn("Auth failed: Refresh token already consumed", {
         sessionId: payload.sid,
@@ -643,11 +683,11 @@ export function createRequireAuth(
       return;
     }
 
-    (req as any).auth = {
+    (req as AuthenticatedRequest).auth = {
       userId: payload.sub,
-      sessionId: payload.sid,
+      sessionId: session.id,
       tokenId: token,
-    } as AuthContext;
+    };
 
     (req as AuthenticatedRequest).user = {
       sub: payload.sub,

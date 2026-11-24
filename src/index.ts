@@ -101,7 +101,7 @@ import taxationRouter from './routes/taxation';
 import { PdfRenderJobRepository } from './db/repositories/pdfRenderJobRepository';
 import { InMemoryStatementPdfStorage } from './services/statementPdfService';
 import createStatementsRouter from './routes/statements';
-import { createRequireAuth } from './middleware/auth';
+import { createRequireAuth, requireCompliance } from './middleware/auth';
 // \u2500\u2500 Auth routers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 import { createLoginRouter } from './auth/login/loginRoute';
 import { createRefreshRouter } from './auth/refresh/refreshRoute';
@@ -871,21 +871,7 @@ export function createApp(dependencies: AppDependencies = {}): express.Express {
   const distributionRepo =
     dependencies.distributionRepo ?? new DistributionRepository(pool);
   const payoutRepo: PayoutRepo =
-    dependencies.payoutRepo ?? {
-      async listPayoutsByInvestor(investorId) {
-        const payouts = await distributionRepo.listPayoutsByInvestor(investorId);
-        return payouts.map((payout) => ({
-          id: payout.id,
-          distribution_run_id: payout.distribution_id,
-          investor_id: payout.investor_id,
-          amount: payout.amount,
-          status: payout.status,
-          transaction_hash: payout.tx_hash ?? undefined,
-          created_at: payout.created_at,
-          updated_at: payout.updated_at,
-        }));
-      },
-    };
+    dependencies.payoutRepo ?? new DistributionRepository(pool);
   const balanceSnapshotRepo =
     dependencies.balanceSnapshotRepo ?? new BalanceSnapshotRepository(pool);
   /**
@@ -1476,7 +1462,7 @@ if (require.main === module && env.NODE_ENV !== "test") {
     // When STELLAR_HORIZON_URL is absent the verifier falls back to the testnet
     // endpoint; chain validation is still skipped with a single warning discrepancy
     // if the verifier cannot be constructed.
-    const txVerifier = new StellarTransactionVerifierImpl({
+    const txVerifier = createStellarTransactionVerifier({
       horizonUrl: env.STELLAR_HORIZON_URL,
     });
     const reconciliationScheduler = createReconciliationSchedulerRuntime({

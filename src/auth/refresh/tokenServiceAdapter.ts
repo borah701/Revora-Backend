@@ -1,15 +1,21 @@
 import { createHash } from 'node:crypto';
-import { issueToken, verifyToken, TOKEN_EXPIRY, REFRESH_TOKEN_EXPIRY } from '../../lib/jvt';
+import { issueToken, verifyToken, TOKEN_EXPIRY, REFRESH_TOKEN_EXPIRY } from '../../lib/jwt';
 import { RefreshTokenPayload, TokenService } from './types';
-import { UserRole } from '../login/types';
+import { isUserRole } from '../login/types';
 
 export class JwtTokenServiceAdapter implements TokenService {
     verifyRefreshToken(token: string): RefreshTokenPayload {
-        const payload = verifyToken(token, { expectedType: 'refresh' });
+        const payload = verifyToken(token);
+        if (payload.typ !== 'refresh') {
+            throw new Error('Token is not a refresh token');
+        }
+        if (typeof payload.sid !== 'string' || !isUserRole(payload.role)) {
+            throw new Error('Refresh token is missing required session claims');
+        }
         return {
             userId: payload.sub,
-            sessionId: payload.sid as string,
-            role: payload.role as UserRole,
+            sessionId: payload.sid,
+            role: payload.role,
         };
     }
 

@@ -327,7 +327,7 @@ export class TenantSettingsService {
   ): Promise<TenantSettingsRow> {
     const row = await this.tenantSettingsRepo.findByTenantId(tenantId);
     const pending = row?.settings?.pending_fx_quorum_change as PendingFxQuorumChange | undefined;
-    if (!pending || pending.status !== 'pending') {
+    if (!row || !pending || pending.status !== 'pending') {
       throw new Error('No pending FX quorum change request found for tenant');
     }
     if (requestId && pending.id !== requestId) {
@@ -395,7 +395,7 @@ export class TenantSettingsService {
   ): Promise<TenantSettingsRow> {
     const row = await this.tenantSettingsRepo.findByTenantId(tenantId);
     const pending = row?.settings?.pending_fx_quorum_change as PendingFxQuorumChange | undefined;
-    if (!pending || pending.status !== 'pending') {
+    if (!row || !pending || pending.status !== 'pending') {
       throw new Error('No pending FX quorum change request found for tenant');
     }
     if (requestId && pending.id !== requestId) {

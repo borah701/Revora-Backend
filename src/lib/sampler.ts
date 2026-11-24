@@ -1,4 +1,4 @@
-import { monitorEventLoopDelay, EventLoopMonitor } from 'perf_hooks';
+import { monitorEventLoopDelay, IntervalHistogram } from 'perf_hooks';
 import * as inspector from 'inspector';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -22,7 +22,7 @@ export interface SamplerConfig {
  */
 export class EventLoopSampler {
   private config: Required<SamplerConfig>;
-  private monitor: EventLoopMonitor | null = null;
+  private monitor: IntervalHistogram | null = null;
   private checkInterval: NodeJS.Timeout | null = null;
   private lastCaptureTime: number = 0;
   private isCapturing: boolean = false;
@@ -136,7 +136,7 @@ export class EventLoopSampler {
       try {
         this.session.post('Profiler.disable', () => {});
         this.session.disconnect();
-      } catch (e) {
+      } catch {
         // Ignore disconnect errors
       }
       this.session = null;
@@ -172,11 +172,10 @@ export class EventLoopSampler {
           await fs.unlink(filepath);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Ignore if directory doesn't exist yet
-      if (err.code !== 'ENOENT') {
-        throw err;
-      }
+      if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return;
+      throw err;
     }
   }
 }
