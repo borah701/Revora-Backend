@@ -5,7 +5,6 @@ import {
   PayoutDriftRepository,
   PayoutForVerification,
   DriftDetail,
-  DriftSummary,
 } from '../db/repositories/payoutDriftRepository';
 import { StellarTransactionVerifier } from '../lib/stellarTransactionVerifier';
 
@@ -22,7 +21,7 @@ const SCALE_FACTOR = 10n ** BigInt(DECIMAL_SCALE);
  */
 function toBigIntUnits(amount: string): bigint {
   const [intPart, fracPart = ''] = amount.split('.');
-  const sign = intPart.startsWith('-') ? -1 : 1;
+  const sign = intPart.startsWith('-') ? -1n : 1n;
   const cleanInt = intPart.replace(/^-/, '');
   const padded = (fracPart + '0'.repeat(DECIMAL_SCALE)).slice(0, DECIMAL_SCALE);
   return (

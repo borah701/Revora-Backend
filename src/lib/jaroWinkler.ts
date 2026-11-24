@@ -7,14 +7,14 @@
 
 // Cyrillic to Latin transliteration character map (ISO 9 standard variant)
 const CYRILLIC_TO_LATIN_MAP: Record<string, string> = {
-  'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+  'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
   'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
   'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
   'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch',
   'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
-  'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Б': 'Yo',
+  'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E',
   'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
-  'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
+  'Ё': 'E', 'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
   'Ф': 'F', 'Х': 'Kh', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Shch',
   'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya',
 };
@@ -45,9 +45,9 @@ export function normalizeName(str: string): string {
   // Transliterate Cyrillic to Latin first
   let normalized = transliterateCyrillic(str);
   
-  // Normalize unicode (NFD) to separate base characters and diacritical marks
+  // Compatibility decomposition handles fullwidth letters and diacritical variants.
   normalized = normalized
-    .normalize('NFD')
+    .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '') // Strip combining marks
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ') // Replace non-alphanumeric punctuation with spaces

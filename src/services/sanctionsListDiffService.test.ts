@@ -12,7 +12,7 @@
  *
  * All database calls are replaced by in-memory fakes so no real DB is needed.
  */
-import { SanctionsListDiffService, SANCTIONS_DIFF_SIZE_METRIC, SANCTIONS_CHANGES_DETECTED_METRIC, SANCTIONS_RETENTION_METRIC, SEVEN_YEAR_MS } from './sanctionsListDiffService';
+import { SanctionsListDiffService, SEVEN_YEAR_MS } from './sanctionsListDiffService';
 import { SanctionsListVersionsRepository, SanctionsListVersion, SanctionsListDiffDetail, CreateVersionInput, CreateDiffDetailInput } from '../db/repositories/sanctionsListVersionsRepository';
 import { MetricsCollector } from '../lib/metrics';
 import { OfacEntry } from './ofacSanctionsLoader';
@@ -350,12 +350,13 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
     const { svc, repo } = makeService();
     const entries = [makeEntry('1', 'Alice')];
     const first = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, entries, true);
+    const initialDiffDetailCount = repo.diffDetails.length;
 
     // Same parse hash — no changes
     await svc.recordLoadWithDiff('ofac', '2024-01-08', RAW_PAYLOAD, entries, true, first.parse_hash);
 
     expect(repo.versions).toHaveLength(2);
-    expect(repo.diffDetails).toHaveLength(0); // no details for no-change
+    expect(repo.diffDetails).toHaveLength(initialDiffDetailCount);
     expect(repo.versions[1].diff_size).toBe(0);
   });
 
@@ -368,7 +369,7 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
   });
 
   it('links no-change reload to previous_version_id', async () => {
-    const { svc, repo } = makeService();
+    const { svc } = makeService();
     const entries = [makeEntry('1', 'Alice')];
     const first = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, entries, true);
     const second = await svc.recordLoadWithDiff('ofac', '2024-01-08', 'new payload', entries, true, first.parse_hash);
@@ -377,7 +378,7 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
 
   it('writes diff details with the correct version_id when entries change', async () => {
     const { svc, repo } = makeService();
-    const v1 = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], true);
+    await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], true);
 
     const entries = [makeEntry('1', 'Alice'), makeEntry('2', 'Bob')];
     const v2 = await svc.recordLoadWithDiff('ofac', '2024-01-08', 'payload2', entries, true);
@@ -412,7 +413,7 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
   });
 
   it('emits changes_detected counter when diff_size > 0', async () => {
-    const { svc, repo, metrics } = makeService();
+    const { svc, metrics } = makeService();
     await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], true);
     await svc.recordLoadWithDiff('ofac', '2024-01-08', 'payload2', [makeEntry('1', 'Alice')], true);
     const snapshot = await metrics.getSnapshot();
@@ -422,18 +423,21 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
   });
 
   it('does NOT emit changes_detected counter when diff_size = 0', async () => {
-    const { svc, repo, metrics } = makeService();
+    const { svc, metrics } = makeService();
     const entries = [makeEntry('1', 'Alice')];
     const first = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, entries, true);
+    const beforeReload = await metrics.getSnapshot();
+    const counterBefore = beforeReload.custom.find(
+      (m) => m.name === 'sanctions_list_diff_changes_detected',
+    )?.value ?? 0;
     await svc.recordLoadWithDiff('ofac', '2024-01-08', RAW_PAYLOAD, entries, true, first.parse_hash);
     const snapshot = await metrics.getSnapshot();
     const counter = snapshot.custom.find((m) => m.name === 'sanctions_list_diff_changes_detected');
-    // Counter should not exist or should be 0 when no changes detected
-    expect(counter?.value ?? 0).toBe(0);
+    expect(counter?.value ?? 0).toBe(counterBefore);
   });
 
   it('accepts an explicit parseHash to skip re-computation', async () => {
-    const { svc, repo } = makeService();
+    const { svc } = makeService();
     const entries = [makeEntry('1', 'Alice')];
     const fixedHash = 'a'.repeat(64);
     const ver = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, entries, true, fixedHash);
@@ -441,7 +445,7 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
   });
 
   it('records signature_valid = false without throwing', async () => {
-    const { svc, repo } = makeService();
+    const { svc } = makeService();
     const ver = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], false);
     expect(ver.signature_valid).toBe(false);
   });
@@ -465,21 +469,21 @@ describe('SanctionsListDiffService.recordLoadWithDiff', () => {
 
 describe('SanctionsListDiffService.generateChangelog', () => {
   it('returns a string containing the version source', async () => {
-    const { svc, repo } = makeService();
+    const { svc } = makeService();
     const ver = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], true);
     const log = await svc.generateChangelog(ver.id);
     expect(log).toContain('ofac');
   });
 
   it('includes no-changes message when diff is empty', async () => {
-    const { svc, repo } = makeService();
+    const { svc } = makeService();
     const ver = await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], true);
     const log = await svc.generateChangelog(ver.id);
     expect(log).toContain('No changes detected');
   });
 
   it('lists added entities by name and UID', async () => {
-    const { svc, repo } = makeService();
+    const { svc } = makeService();
     // First load creates prev
     await svc.recordLoadWithDiff('ofac', '2024-01-01', RAW_PAYLOAD, [], true);
     const entries = [makeEntry('42', 'Evil Corp')];

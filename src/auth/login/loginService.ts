@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { comparePassword } from '../../utils/password';
 import {
     JwtIssuer,
@@ -6,7 +6,7 @@ import {
     SessionRepository,
     UserRepository,
 } from './types';
-import { hashSessionToken, SESSION_TTL_MS, computeFamilyExpiresAt } from '../session';
+import { computeFamilyExpiresAt } from '../session';
 
 /**
  * Fixed hash used for the dummy password verification when no user is found.
@@ -57,7 +57,7 @@ export class LoginService {
         //    — so both branches take comparable time and no timing oracle
         //    reveals whether an account exists.
         const storedHash = user?.passwordHash ?? DUMMY_PASSWORD_HASH;
-        const passwordValid = this.verifyPassword(password, storedHash);
+        const passwordValid = await this.verifyPassword(password, storedHash);
 
         if (!user || !passwordValid) {
             return null;
@@ -99,5 +99,9 @@ export class LoginService {
                 role: user.role,
             },
         };
+    }
+
+    private verifyPassword(password: string, storedHash: string): Promise<boolean> {
+        return comparePassword(password, storedHash);
     }
 }

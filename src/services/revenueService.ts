@@ -11,6 +11,7 @@ import { LogLevel } from '../lib/logger';
 import { Pool } from 'pg';
 import { pool } from '../db/client';
 import { TransactionError, withTransaction } from '../db/transaction';
+import { isPositiveDecimalAmount } from '../lib/amountValidation';
 
 export interface SubmitRevenueReportInput {
     offeringId: string;
@@ -131,6 +132,7 @@ export class RevenueService {
             amount: input.amount,
             period_start: input.periodStart,
             period_end: input.periodEnd,
+            reported_by: input.issuerId,
         };
 
         // Serialize submissions for this offering so the overlap check sees any prior

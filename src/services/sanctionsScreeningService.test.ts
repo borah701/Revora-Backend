@@ -16,7 +16,7 @@ function makeSnapshot(overrides?: Partial<SanctionsSnapshot>): SanctionsSnapshot
 
 function makeRepo(snapshots: SanctionsSnapshot[]): SanctionsListRepository {
   const mocked = {
-    findLatestAcrossSources: jest.fn().mockResolved(snapshots),
+    findLatestAcrossSources: jest.fn().mockResolvedValue(snapshots),
     calculateChecksum: () => 'x',
   };
   return mocked as unknown as SanctionsListRepository;
@@ -24,21 +24,22 @@ function makeRepo(snapshots: SanctionsSnapshot[]): SanctionsListRepository {
 
 describe('normalizeName', () => {
   it('applies NFKD decomposition, lowercasing, and whitespace collapse', () => {
-    expect(normalizeName('  Iván   PÉREZ  ')).to(Be('ivan perez'));
+    expect(normalizeName('  Iván   PÉREZ  ')).toBe('ivan perez');
   });
 
   it('detects fullwidth/homoglyph variants as equal', () => {
-    expect(normalizeName('ⅶladimir')).toBe(normalizeName('Vladimir'));
+    expect(normalizeName('Ｖladimir')).toBe(normalizeName('Vladimir'));
   });
 
   it('strips punctuation such as hyphens, apostrophes and commas', () => {
-    expect(normalizeName("Dae, John")).to(Be('dae john'));
+    expect(normalizeName("Dae, John")).toBe('dae john');
     expect(normalizeName("John-Doe")).toBe('john doe');
     expect(normalizeName("O'Brien")).toBe('o brien');
   });
 
   it('transliterates Cyrillic to Latin', () => {
-    expect(normalizeName('Иван Петров Пётров')).toBe(normalizeName('Ivan Petrov'));
+    expect(normalizeName('Иван Петров')).toBe(normalizeName('Ivan Petrov'));
+    expect(normalizeName('Пётров')).toBe(normalizeName('Петров'));
   });
 });
 
@@ -120,7 +121,7 @@ describe('SanctionsScreeningService', () => {
       { description: 'Cyrillic list entry vs uppercase Latin (IVAN PETROV)', listName: 'Иван Петров', identity: 'IVAN PETROV' },
     ];
 
-    it.each('$#description is blocked', async ({ listName, identity }) => {
+    it.each(cases)('$#description is blocked', async ({ listName, identity }) => {
       const repo = makeRepo(SUPPORTED_LIST_SOURCES.map((src) =>
         makeSnapshot({ list_source: src, entries: [{ uid: 'evasion', name: listName }] }),
       ));
@@ -147,7 +148,7 @@ describe('SanctionsScreeningService', () => {
       const repo = makeRepo([makeSnapshot({ entries: [{ uid: 'fz', name: 'Alexander Petrov' }] })]);
       const svc = new SanctionsScreeningService(repo);
       // Transposed letters that are not an exact/partial match.
-      const result = await svc.screen(['Alexander Petrov']);
+      const result = await svc.screen(['Alexsander Petrov']);
       expect(result.cleared).toBe(false);
       const fuzzy = result.matches.find((m) => m.matchType === 'fuzzy');
       expect(fuzzy).toBeDefined();

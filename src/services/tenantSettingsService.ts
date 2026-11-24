@@ -63,6 +63,15 @@ export class TenantSettingsService {
       throw new Error('Change reason is required for dual-control approval');
     }
 
+    const currentSettings =
+      (await this.tenantSettingsRepo.findByTenantId(tenantId))?.settings ?? {};
+    const existingPending = currentSettings.pending_threshold_change as
+      | PendingThresholdChange
+      | undefined;
+    if (existingPending?.status === 'pending') {
+      throw Errors.conflict('A sanctions threshold change is already pending');
+    }
+
     const pendingChange: PendingThresholdChange = {
       id: `thresh_req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       proposed_threshold: proposedThreshold,
@@ -112,7 +121,7 @@ export class TenantSettingsService {
   async approveSanctionsThreshold(
     tenantId: string,
     approverUserId: string,
-    requestId: string,
+    requestId?: string,
   ): Promise<TenantSettingsRow> {
     const row = await this.tenantSettingsRepo.findByTenantId(tenantId);
     if (!row || !row.settings?.pending_threshold_change) {
@@ -122,6 +131,9 @@ export class TenantSettingsService {
     const pending = row.settings.pending_threshold_change as PendingThresholdChange;
     if (pending.status !== 'pending') {
       throw new Error(`Threshold change request is already ${pending.status}`);
+    }
+    if (requestId && pending.id !== requestId) {
+      throw Errors.conflict('The sanctions threshold change request is stale');
     }
 
     // Dual-control check: Proposer cannot approve their own request!
@@ -174,7 +186,7 @@ export class TenantSettingsService {
     tenantId: string,
     rejecterUserId: string,
     reason: string,
-    requestId: string,
+    requestId?: string,
   ): Promise<TenantSettingsRow> {
     const row = await this.tenantSettingsRepo.findByTenantId(tenantId);
     if (!row || !row.settings?.pending_threshold_change) {
@@ -182,6 +194,9 @@ export class TenantSettingsService {
     }
 
     const pending = row.settings.pending_threshold_change as PendingThresholdChange;
+    if (requestId && pending.id !== requestId) {
+      throw Errors.conflict('The sanctions threshold change request is stale');
+    }
     const updatedSettings = {
       ...row.settings,
       pending_threshold_change: null,
@@ -245,6 +260,15 @@ export class TenantSettingsService {
       throw new Error('Change reason is required for dual-control approval');
     }
 
+    const currentSettings =
+      (await this.tenantSettingsRepo.findByTenantId(tenantId))?.settings ?? {};
+    const existingPending = currentSettings.pending_fx_quorum_change as
+      | PendingFxQuorumChange
+      | undefined;
+    if (existingPending?.status === 'pending') {
+      throw Errors.conflict('An FX quorum change is already pending');
+    }
+
     const pending: PendingFxQuorumChange = {
       id: `fxq_req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       proposed_k: k,
@@ -299,12 +323,15 @@ export class TenantSettingsService {
   async approveFxQuorumConfig(
     tenantId: string,
     approverUserId: string,
-    requestId: string,
+    requestId?: string,
   ): Promise<TenantSettingsRow> {
     const row = await this.tenantSettingsRepo.findByTenantId(tenantId);
     const pending = row?.settings?.pending_fx_quorum_change as PendingFxQuorumChange | undefined;
     if (!pending || pending.status !== 'pending') {
       throw new Error('No pending FX quorum change request found for tenant');
+    }
+    if (requestId && pending.id !== requestId) {
+      throw Errors.conflict('The FX quorum change request is stale');
     }
 
     if (pending.proposer_id === approverUserId) {
@@ -364,12 +391,15 @@ export class TenantSettingsService {
     tenantId: string,
     rejecterUserId: string,
     reason: string,
-    requestId: string,
+    requestId?: string,
   ): Promise<TenantSettingsRow> {
     const row = await this.tenantSettingsRepo.findByTenantId(tenantId);
     const pending = row?.settings?.pending_fx_quorum_change as PendingFxQuorumChange | undefined;
     if (!pending || pending.status !== 'pending') {
       throw new Error('No pending FX quorum change request found for tenant');
+    }
+    if (requestId && pending.id !== requestId) {
+      throw Errors.conflict('The FX quorum change request is stale');
     }
 
     const updatedSettings = {

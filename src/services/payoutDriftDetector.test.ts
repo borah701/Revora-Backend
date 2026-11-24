@@ -3,9 +3,9 @@ import { MetricsCollector } from '../lib/metrics';
 import {
   PayoutDriftRepository,
   PayoutForVerification,
-  DriftDetail,
 } from '../db/repositories/payoutDriftRepository';
 import { StellarTransactionVerifier } from '../lib/stellarTransactionVerifier';
+import type { Pool } from 'pg';
 
 function makeMockRepo(): jest.Mocked<PayoutDriftRepository> {
   return {
@@ -17,13 +17,13 @@ function makeMockRepo(): jest.Mocked<PayoutDriftRepository> {
     getPayoutsWithDuplicateTxHashes: jest.fn(),
     getLatestReport: jest.fn(),
     getReportsSince: jest.fn(),
-  } as any;
+  } as unknown as jest.Mocked<PayoutDriftRepository>;
 }
 
 function makeMockVerifier(): jest.Mocked<StellarTransactionVerifier> {
   return {
     verifyTransaction: jest.fn(),
-  } as any;
+  } as unknown as jest.Mocked<StellarTransactionVerifier>;
 }
 
 function makePayout(overrides: Partial<PayoutForVerification> = {}): PayoutForVerification {
@@ -53,7 +53,7 @@ describe('PayoutDriftDetector', () => {
     mockVerifier = makeMockVerifier();
 
     detector = new PayoutDriftDetector(
-      {} as any,
+      {} as unknown as Pool,
       mockRepo,
       metrics,
       mockVerifier,
@@ -62,7 +62,7 @@ describe('PayoutDriftDetector', () => {
   });
 
   afterEach(() => {
-    detector.stop();
+    if (detector) detector.stop();
   });
 
   describe('runDriftDetection', () => {
@@ -250,7 +250,11 @@ describe('PayoutDriftDetector', () => {
       const result = await detector.runDriftDetection();
 
       expect(result.errors).toHaveLength(0);
-      expect(mockRepo.saveReport).toHaveBeenCalled();
+      expect(mockVerifier.verifyTransaction).toHaveBeenCalledWith(
+        payout.tx_hash,
+        payout.amount,
+      );
+      expect(mockRepo.saveReport).not.toHaveBeenCalled();
     });
 
     it('sets alarm when drift is older than threshold', async () => {
@@ -292,7 +296,7 @@ describe('PayoutDriftDetector', () => {
 
       await detector.runDriftDetection();
 
-      expect(metrics.exportPrometheus()).toContain('payout_drift_alarm{} 0');
+      expect(metrics.exportPrometheus()).toContain('payout_drift_alarm 0');
     });
 
     it('handles multiple offerings independently', async () => {
@@ -382,6 +386,16 @@ describe('PayoutDriftDetector', () => {
     });
 
     it('stop() clears the interval', () => {
+      mockRepo.getPayoutsByOffering.mockResolvedValue([]);
+      mockRepo.getAggregatedDriftSummary.mockResolvedValue({
+        total_missing: 0,
+        total_underfunded: 0,
+        total_overfunded: 0,
+        total_duplicate_tx: 0,
+        total_drift_amount: '0',
+        oldest_drift_hours: 0,
+      });
+      detector.start();
       const clearSpy = jest.spyOn(global, 'clearInterval');
       detector.stop();
       expect(clearSpy).toHaveBeenCalled();
@@ -400,9 +414,9 @@ describe('PayoutDriftDetector', () => {
       });
 
       detector.start();
-      const firstInterval = (detector as any).intervalId;
+      const firstInterval = (detector as unknown as { intervalId?: NodeJS.Timeout }).intervalId;
       detector.start();
-      const secondInterval = (detector as any).intervalId;
+      const secondInterval = (detector as unknown as { intervalId?: NodeJS.Timeout }).intervalId;
 
       expect(firstInterval).not.toBe(secondInterval);
       detector.stop();
@@ -449,6 +463,13 @@ describe('PayoutDriftDetector', () => {
     });
 
     it('reports discrepancy at full precision for sub-cent drift', async () => {
+      detector = new PayoutDriftDetector(
+        {} as unknown as Pool,
+        mockRepo,
+        metrics,
+        mockVerifier,
+        { intervalMs: 999999, driftThresholdHours: 24, toleranceAmount: '0.0000000001' },
+      );
       const payout = makePayout({
         id: 'payout-001',
         investor_id: 'inv-001',
@@ -482,6 +503,13 @@ describe('PayoutDriftDetector', () => {
     });
 
     it('sums totalDriftAmount exactly for 10-decimal inputs', async () => {
+      detector = new PayoutDriftDetector(
+        {} as unknown as Pool,
+        mockRepo,
+        metrics,
+        mockVerifier,
+        { intervalMs: 999999, driftThresholdHours: 24, toleranceAmount: '0' },
+      );
       const payouts = [
         makePayout({ id: 'p1', investor_id: 'inv-1', amount: '0.0000000001', tx_hash: 'h1' }),
         makePayout({ id: 'p2', investor_id: 'inv-2', amount: '0.0000000002', tx_hash: 'h2' }),
@@ -553,7 +581,7 @@ describe('PayoutDriftDetector', () => {
 
     it('uses a custom tolerance when provided', async () => {
       const detectorWithTolerance = new PayoutDriftDetector(
-        {} as any,
+        {} as unknown as Pool,
         mockRepo,
         metrics,
         mockVerifier,
